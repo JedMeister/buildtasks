@@ -91,13 +91,17 @@ $BT/bin/iso-download $BT_ISOS $BT_VERSION $appname
 $BT/bin/iso-verify $BT_ISOS $BT_VERSION $appname
 
 cd $O
-tklpatch-extract-iso $BT_ISOS/$isofile
+if [ -d "$rootfs" ] && [ -d "$cdroot" ]; then
+    info "rootfs and cdroot already exist..."
+    info "assuming patches applied and ready to bundle"
+else
+    tklpatch-extract-iso $BT_ISOS/$isofile
 
-tklpatch-apply $rootfs $BT/patches/vm
-$BT/bin/rootfs-cleanup $rootfs
+    tklpatch-apply $rootfs $BT/patches/vm
+    $BT/bin/rootfs-cleanup $rootfs
 
-$BT/bin/aptconf-tag $rootfs vm
-
+    $BT/bin/aptconf-tag $rootfs vm
+fi
 $BT/bin/vm-bundle $rootfs
 
 $BT/bin/generate-signature $O/$name-vmdk.zip
