@@ -91,14 +91,15 @@ $BT/bin/iso-download $BT_ISOS $BT_VERSION $appname
 $BT/bin/iso-verify $BT_ISOS $BT_VERSION $appname
 
 cd $O
-tklpatch-extract-iso $BT_ISOS/$isofile
-
-tklpatch-apply $rootfs $BT/patches/vm
-$BT/bin/rootfs-cleanup $rootfs
-
-$BT/bin/aptconf-tag $rootfs vm
-
-$BT/bin/vm-bundle $O/$rootfs
+if [ -d "$rootfs" ] && [ -d "$cdroot" ]; then
+    info "reusing existing rootfs and cdroot"
+else
+    tklpatch-extract-iso $BT_ISOS/$isofile
+    tklpatch-apply $rootfs $BT/patches/vm
+    $BT/bin/rootfs-cleanup $rootfs
+    $BT/bin/aptconf-tag $rootfs vm
+fi
+$BT/bin/vm-bundle $rootfs
 
 $BT/bin/generate-signature $O/$name-vmdk.zip
 $BT/bin/generate-signature $O/$name-ovf.zip
