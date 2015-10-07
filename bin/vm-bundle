@@ -59,7 +59,7 @@ VM_PARTED_LVM_SWAP="512MB"
 #VM_PARTED_LVM_SWAP="50MB"
 
 # workaround weird kpartx bug
-modprobe dm-mod
+#modprobe dm-mod
 
 VG=turnkey
 [ -e /dev/$VG ] && VG=turnkeyvm
@@ -77,19 +77,19 @@ parted --script -- $rootfs.raw set 2 LVM on
 info "setting up loop device and LVM"
 #loopdev=$(losetup --show -f $rootfs.raw)
 kpartx -as $rootfs.raw
-loopdev=$(kpartx -l turnkey-core-14.0-jessie-amd64.rootfs.raw | grep p1 | sed 's|p1.*||')
+loopdev=$(kpartx -l $rootfs.raw | grep p1 | sed 's|p1.*||')
 
 
 pvcreate /dev/mapper/${loopdev}p2
 vgcreate $VG /dev/mapper/${loopdev}p2
-lvcreate -L $VM_PARTED_LVM_ROOT -n root $VG
-lvcreate -L $VM_PARTED_LVM_SWAP -n swap_1 $VG
+echo y | lvcreate -L $VM_PARTED_LVM_ROOT -n root $VG
+echo y | lvcreate -L $VM_PARTED_LVM_SWAP -n swap_1 $VG
 vgscan
 vgchange -a y
 
 info "creating filesystems (boot, root, swap)"
-mkfs.ext2 /dev/mapper/${loopdev}p1
-mkfs.ext4 /dev/mapper/$VG-root
+echo y | mkfs.ext2 /dev/mapper/${loopdev}p1
+echo y | mkfs.ext4 /dev/mapper/$VG-root
 mkswap /dev/mapper/$VG-swap_1
 
 info "mounting raw root partition and syncing rootfs, removing boot/*"
@@ -123,25 +123,24 @@ info "installing and configuring grub"
 grubcfg=$rootfs.fs/boot/grub/grub.cfg
 devicemap=$rootfs.fs/boot/grub/device.map
 
-cat > $devicemap <<EOF
-(hd0)   /dev/mapper/${loopdev}p2
-(hd0,1) /dev/mapper/${loopdev}p1
-EOF
+#cat > $devicemap <<EOF
+#(hd0)   /dev/mapper/$loopdev
+#EOF
 
-chroot $rootfs.fs grub-mkconfig -o /boot/grub/grub.cfg
-grub-install --force --root-directory=$rootfs.fs /dev/$loopdev
+#chroot $rootfs.fs grub-mkdevicemap
+#chroot $rootfs.fs grub-mkconfig -o /boot/grub/grub.cfg
+#grub-install --force --grub-mkdevicemap=$devicemap --root-directory=$rootfs.fs /dev/$loopdev
+chroot $rootfs.fs grub-install /dev/$loopdev
 
-exit 1 
-
-info "tweaking grub settings"
-UUID=$(blkid -o value -s UUID /dev/mapper/${loopdev}p1)
-cat > $devicemap <<EOF
-(hd0)   UUID=$UUID
-EOF
+#info "tweaking grub settings"
+#UUID=$(blkid -o value -s UUID /dev/mapper/${loopdev}p1)
+#cat > $devicemap <<EOF
+#(hd0)   UUID=$UUID
+#EOF
 
 #sed -i "s|root='(hd0,1)'|root=(sd0,1)|g" $grubcfg
-sed -i "/loopback/d" $grubcfg
-sed -i "/set root=(loop/d" $grubcfg
+#sed -i "/loopback/d" $grubcfg
+#sed -i "/set root=(loop/d" $grubcfg
 
 info "creating fstab"
 fstab="$rootfs.fs/etc/fstab"
@@ -157,23 +156,27 @@ grep $rootfs.fs/sys /proc/mounts | cut -f2 -d" " | sort -r | xargs umount -n
 umount $rootfs.fs/dev
 umount $rootfs.fs/boot
 umount $rootfs.fs/
-#losetup -d $loopboot
-#losetup -d $looproot
-kpartx -d $rootfs.raw
-rmdir $rootfs.fs
+losetup -d /dev/mapper/${loopdev}p1 || true
+losetup -d /dev/mapper/${loopdev}p2 || true
+losetup -d /dev/${loopdev} || true
+rmdir $rootfs.fs || true
+
+
+#info "removing temp config & unmounting raw image"
+#lvremove -f /dev/$VG/root
+#lvremove -f /dev/$VG/swap_1
+#vgremove -f /dev/$VG
+#pvremove -f /dev/mapper/${loopdev}p2
+#vgscan
+#vgchange -a y
+#rm -f /etc/lvm/backup/$VG
+info "about to break..."
+echo $rootfs.raw
+echo $(pwd)
+#kpartx -sd $rootfs.raw
 
 info "converting raw image to vmdk"
 qemu-img convert -f raw $rootfs.raw -O vmdk -o compat6 $name.vmdk
-
-info "cleaning up"
-lvremove -f /dev/$VG/root
-lvremove -f /dev/$VG/swap_1
-vgremove -f /dev/$VG
-vgscan
-vgchange -a y
-rm -f /etc/lvm/backup/$VG
-#kpartx -d $loopdev
-#losetup -d $loopdev
 
 exit 1
 
