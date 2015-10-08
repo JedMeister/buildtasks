@@ -75,7 +75,7 @@ parted --script -- $rootfs.raw set 1 boot on
 parted --script -- $rootfs.raw set 2 LVM on
 
 info "setting up loop device and LVM"
-#loopdev=$(losetup --show -f $rootfs.raw)
+#loopdev=$(basename $(losetup --show -f $rootfs.raw))
 kpartx -as $rootfs.raw
 loopdev=$(kpartx -l $rootfs.raw | grep p1 | sed 's|p1.*||')
 
@@ -123,20 +123,28 @@ info "installing and configuring grub"
 grubcfg=$rootfs.fs/boot/grub/grub.cfg
 devicemap=$rootfs.fs/boot/grub/device.map
 
-#cat > $devicemap <<EOF
-#(hd0)   /dev/mapper/$loopdev
-#EOF
+cat > $devicemap <<EOF
+(hd0)   /dev/mapper/$loopdev
+EOF
+
+cat $devicemap
 
 #chroot $rootfs.fs grub-mkdevicemap
-#chroot $rootfs.fs grub-mkconfig -o /boot/grub/grub.cfg
-#grub-install --force --grub-mkdevicemap=$devicemap --root-directory=$rootfs.fs /dev/$loopdev
-chroot $rootfs.fs grub-install /dev/$loopdev
+chroot $rootfs.fs grub-mkconfig -o /boot/grub/grub.cfg
+info "installing grub conventionally"
+grub-install --debug --force --root-directory=$rootfs.fs /dev/$loopdev
+#info "installing grub trying to work around bug..."
+#chroot $rootfs.fs grub-install --debug /dev/$loopdev
 
-#info "tweaking grub settings"
-#UUID=$(blkid -o value -s UUID /dev/mapper/${loopdev}p1)
-#cat > $devicemap <<EOF
-#(hd0)   UUID=$UUID
-#EOF
+blkid > $rootfs.fs/uuids-from-tkldev
+
+info "tweaking grub settings"
+UUID_BOOT=$(blkid -o value -s UUID /dev/mapper/${loopdev}p1)
+UUID_ROOT=$(blkid -o value -s UUID /dev/mapper/$VG-root)
+cat > $devicemap <<EOF
+(hd0)   UUID=$UUID_BOOT
+(hd1)   UUID=$UUID_ROOT
+EOF
 
 #sed -i "s|root='(hd0,1)'|root=(sd0,1)|g" $grubcfg
 #sed -i "/loopback/d" $grubcfg
@@ -146,7 +154,7 @@ info "creating fstab"
 fstab="$rootfs.fs/etc/fstab"
 echo -e "proc\t\t\t/proc\tproc\tnodev,noexec,nosuid\t0\t0" > $fstab
 echo -e "/dev/mapper/$VG-root\t/\text4\terrors=remount-ro\t0\t1" >> $fstab
-echo -e "UUID=$UUID\t/boot\text2\tdefaults\t0\t2" >> $fstab
+echo -e "UUID=$UUID_BOOT\t/boot\text2\tdefaults\t0\t2" >> $fstab
 echo -e "/dev/mapper/$VG-swap_1\tnone\tswap\tsw\t0\t0" >> $fstab
 
 info "umounting the jumble..."
