@@ -99,22 +99,22 @@ else
     $BT/bin/rootfs-cleanup $rootfs
     $BT/bin/aptconf-tag $rootfs vm
 fi
-$BT/bin/vm-bundle $rootfs
+$BT/bin/vm-bundle $O/$rootfs
 
-$BT/bin/generate-signature $O/$name-vmdk.zip
-$BT/bin/generate-signature $O/$name-ovf.zip
+$BT/bin/generate-signature $O/$name-vmdk-ovf.zip
+$BT/bin/generate-signature $O/$name-ova
 
 # publish if specified
 if [ "$publish" == "yes" ]; then
     export PUBLISH_DEST=${BT_PUBLISH_IMGS}/vmdk/
-    $BT/bin/publish-files $O/$name-vmdk.zip
+    $BT/bin/publish-files $O/$name-vmdk-ovf.zip
 
-    export PUBLISH_DEST=${BT_PUBLISH_IMGS}/ovf/
-    $BT/bin/publish-files $O/$name-ovf.zip
+    export PUBLISH_DEST=${BT_PUBLISH_IMGS}/ova/
+    $BT/bin/publish-files $O/$name-ova
 
     export PUBLISH_DEST=${BT_PUBLISH_META}/
-    $BT/bin/publish-files $O/$name-vmdk.zip.sig
-    $BT/bin/publish-files $O/$name-ovf.zip.sig
+    $BT/bin/publish-files $O/$name-vmdk-ovf.zip.sig
+    $BT/bin/publish-files $O/$name-ova.sig
 fi
 
 if [ -z "$BT_DEBUG" ] && ! (mount | grep -q $(basename $rootfs)); then

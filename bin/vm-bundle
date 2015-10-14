@@ -38,7 +38,9 @@ if [[ "$#" != "1" ]]; then
 fi
 
 rootfs=$1
-name=$(echo $rootfs | sed 's/.rootfs//')
+full_name=$(echo $rootfs | sed 's/.rootfs//')
+name=$(basename $full_name)
+BASE_DIR=$(dirname $full_name)
 
 [ -n "$VM_URL" ] || fatal "VM_URL not set"
 [ -n "$VM_MEMORY" ] || fatal "VM_MEMORY not set"
@@ -72,87 +74,68 @@ parted --script -- $rootfs.raw set 1 boot on
 parted --script -- $rootfs.raw set 2 LVM on
 
 info "setting up loop device and LVM"
-loopdev=$(losetup --show -f $rootfs.raw)
-kpartx -as $loopdev
+kpartx -as $rootfs.raw
+loopdev=$(kpartx -l $rootfs.raw | grep p1 | sed 's|p1.*||')
 
-pvcreate /dev/mapper/$(basename $loopdev)p2
-vgcreate $VG /dev/mapper/$(basename $loopdev)p2
-lvcreate -L $VM_PARTED_LVM_ROOT -n root $VG
-lvcreate -L $VM_PARTED_LVM_SWAP -n swap_1 $VG
+pvcreate /dev/mapper/${loopdev}p2
+vgcreate $VG /dev/mapper/${loopdev}p2
+lvcreate -Z y -L $VM_PARTED_LVM_ROOT -n root $VG
+lvcreate -Z y -L $VM_PARTED_LVM_SWAP -n swap_1 $VG
 vgscan
 vgchange -a y
 
 info "creating filesystems (boot, root, swap)"
-mkfs.ext2 /dev/mapper/$(basename $loopdev)p1
+mkfs.ext2 /dev/mapper/${loopdev}p1
 mkfs.ext4 /dev/mapper/$VG-root
 mkswap /dev/mapper/$VG-swap_1
 
 info "mounting raw root partition and syncing rootfs, removing boot/*"
-mkdir $rootfs.root
-mount /dev/mapper/$VG-root $rootfs.root
-rsync -a -t -r -S -I -H $rootfs/ $rootfs.root
-rm -rf $rootfs.root/boot/*
-umount $rootfs.root
-rmdir $rootfs.root
-
-info "mounting boot partition, syncing boot/* from rootfs"
-mkdir $rootfs.boot
-mount /dev/mapper/$(basename $loopdev)p1 $rootfs.boot
-rsync -a -t -r -S -I -H $rootfs/boot/ $rootfs.boot
-umount $rootfs.boot
-rmdir $rootfs.boot
-
-info "creating rootfs.fs (root and boot)"
-looproot=$(losetup --show -f /dev/mapper/$VG-root)
-loopboot=$(losetup --show -f /dev/mapper/`basename $loopdev`p1)
 mkdir $rootfs.fs
-mount $looproot $rootfs.fs
-mount $loopboot $rootfs.fs/boot
+mount /dev/mapper/$VG-root $rootfs.fs
+mkdir -p $rootfs.fs/boot
+mount /dev/mapper/${loopdev}p1 $rootfs.fs/boot
+rsync -a -t -r -S -I -H $rootfs/ $rootfs.fs
 
 info "mount binding dev and proc"
-mount --rbind --make-rslave /dev $rootfs.fs/dev
-mount --rbind --make-rslave /dev $rootfs.fs/sys
-mount --rbind --make-rslave /dev $rootfs.fs/proc
+mount --bind --make-rslave /dev $rootfs.fs/dev
+mount --bind --make-rslave /sys $rootfs.fs/sys
+mount --bind --make-rslave /proc $rootfs.fs/proc
 
 info "installing and configuring grub"
-grubcfg=$rootfs.fs/boot/grub/grub.cfg
 devicemap=$rootfs.fs/boot/grub/device.map
 
 cat > $devicemap <<EOF
-(hd0)   $loopdev
+(hd0)   /dev/${loopdev}
 EOF
+
+info "temp device map:"
+cat $devicemap
 
 chroot $rootfs.fs grub-mkconfig -o /boot/grub/grub.cfg
-grub-install --force --grub-mkdevicemap=$devicemap --root-directory=$rootfs.fs $loopdev
+grub-install --force --root-directory=$rootfs.fs /dev/$loopdev
 
 info "tweaking grub settings"
-UUID=$(blkid -o value -s UUID /dev/mapper/`basename $loopdev`p1)
+UUID_BOOT=$(blkid -o value -s UUID /dev/mapper/${loopdev}p1)
+UUID_ROOT=$(blkid -o value -s UUID /dev/mapper/$VG-root)
 cat > $devicemap <<EOF
-(sd0)   /dev/sda
-(sd0)   UUID=$UUID
+(hd0)   UUID=$UUID_BOOT
+(hd1)   UUID=$UUID_ROOT
 EOF
-
-sed -i "s|root='(hd0,1)'|root=(sd0,1)|g" $grubcfg
-sed -i "/loopback/d" $grubcfg
-sed -i "/set root=(loop/d" $grubcfg
 
 info "creating fstab"
 fstab="$rootfs.fs/etc/fstab"
 echo -e "proc\t\t\t/proc\tproc\tnodev,noexec,nosuid\t0\t0" > $fstab
 echo -e "/dev/mapper/$VG-root\t/\text4\terrors=remount-ro\t0\t1" >> $fstab
-echo -e "UUID=$UUID\t/boot\text2\tdefaults\t0\t2" >> $fstab
+echo -e "UUID=$UUID_BOOT\t/boot\text2\tdefaults\t0\t2" >> $fstab
 echo -e "/dev/mapper/$VG-swap_1\tnone\tswap\tsw\t0\t0" >> $fstab
 
 info "umounting the jumble..."
 umount $rootfs.fs/proc
 grep $rootfs.fs/sys /proc/mounts | cut -f2 -d" " | sort -r | xargs umount -n
-#umount $rootfs.fs/sys
 umount $rootfs.fs/dev
 umount $rootfs.fs/boot
 umount $rootfs.fs/
-losetup -d $loopboot
-losetup -d $looproot
-rmdir $rootfs.fs
+rm -rf $rootfs.fs
 
 info "converting raw image to vmdk"
 qemu-img convert -f raw $rootfs.raw -O vmdk -o compat6 $name.vmdk
@@ -164,8 +147,9 @@ vgremove -f /dev/$VG
 vgscan
 vgchange -a y
 rm -f /etc/lvm/backup/$VG
-kpartx -d $loopdev
-losetup -d $loopdev
+
+kpartx -d $rootfs.raw
+rm -f $rootfs.raw
 
 info "creating vmx"
 cat > $name.vmx<<EOF 
@@ -217,17 +201,29 @@ EOF
 
 chown -R root:root $name
 chmod 600 $name/*
-chmod 644 $name/$name.vmx
+chmod 644 $name/*.vmx
 
-info "generating vmdk zip"
-zip -r -T $name-vmdk.zip $name
-
-info "creating ovf and generate zip"
-cd $name
+info "creating ovf"
+cd $full_name
 ovftool $name.vmx $name.ovf
-rm $name.vmx $name.vmdk
+
+info "tweaking ovf & generating ova"
+
+# fix vm name (otherwise defaults to "vm" in VBox)
+sed -i "/VirtualSystem ovf:id/ s|=\".*|=\"$VM_FULLNAME\">|" $name.ovf
+
+# fix OSType: 102 = "other64" (1 = other)
+sed -i "/OperatingSystemSection ovf:id/ s|\"1\".*|\"102\">|" $name.ovf
+
+# update SHA of fixed ovf
+SHA=$(openssl sha1 $name.ovf)
+sed -i "s|.*$name.ovf.*|$SHA|" $name.mf
+
+ovftool $name.ovf ../$name.ova
+rm $name.vmdk
 cd ../
-zip -r -T $name-ovf.zip $name
+info "zipping archive"
+zip -r -T $name-vmdk-ovf.zip $name
 
 if [ -z "$BT_DEBUG" ]; then
     info "performing final cleanup"
