@@ -153,7 +153,7 @@ done
 
 [[ -n "$appname" ]] || usage "Must give one app name"
 
-# don't try screens for tkldev & extend MAX_COUNT for gitlab & canvas
+# don't try screens for tkldev & core; extend time/tries for gitlab & canvas
 if [[ -z "$no_screens" ]]; then
     case $appname in
         tkldev|core)
@@ -161,7 +161,10 @@ if [[ -z "$no_screens" ]]; then
             no_screens="true";;
         gitlab|canvas)
             # GitLab & Canvas take ages to start...
-            export MAX_COUNT=70 # possibly overkill
+            if [[ $WEBDRIVER_CONNECT_TIMEOUT -lt 10 ]]; then
+                export WEBDRIVER_CONNECT_TIMEOUT=10
+            fi
+            export MAX_COUNT=100 # possibly overkill
             ;;
     esac
 fi
