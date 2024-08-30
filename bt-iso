@@ -16,7 +16,7 @@ info() { echo "INFO [$(basename "$0")]: $*"; }
 
 usage() {
     cat<<EOF
-Syntax: $(basename "$0") [--publish | -u] [-n] [-s] appname
+Syntax: $(basename "$0") [--publish | -u [iso/path]] [-n] [-s] appname
 Builds appliance appname (e.g., core) ISO
 
 Arguments::
@@ -26,8 +26,9 @@ Arguments::
 Options::
 
     -n|--no-screens     - skip taking screenshots
-    -u|--use-existing   - use an existing iso, rather than rebuilding, will
-                          fail if iso does not exist
+    -u|--use-existing   - use an existing iso, rather than rebuilding
+                          - default if iso path ot given: build/product.iso
+                          - will fail if iso does not exist
     -s|--skip-setup     - skip the inital setup step
     --publish           - publish iso, release files and tklbam profile,
                           incompatible with -u|--use-existing and
@@ -129,7 +130,7 @@ check_debug() {
 export WEBDRIVER_CONNECT_ATTEMPTS=${WEBDRIVER_CONNECT_ATTEMPTS:-200}
 export WEBDRIVER_CONNECT_TIMEOUT=${WEBDRIVER_CONNECT_TIMEOUT:-5}
 ARGS="$*"
-unset no_screens use_existing appname skip_setup TKL_CODENAME
+unset no_screens use_existing iso appname skip_setup TKL_CODENAME
 while [[ "$1" != "" ]]; do
     case $1 in
         --help|-h)          usage;;
@@ -137,8 +138,10 @@ while [[ "$1" != "" ]]; do
         -n|--no-screens)    no_screens="true";;
         -s|--skip-setup)    skip_setup="true";;
         -u|--use-existing)  use_existing="true"
-                            shift
-                            iso="$1";;
+                            if ! [[ "$2" =~ ^-.* ]]; then
+                                shift
+                                iso="$1"
+                            fi;;
         *)                  if [[ -n "$appname" ]]; then
                                 usage "Accepts only one appliance name"
                             else
@@ -296,8 +299,12 @@ fi
 
 cd "$BT_PRODUCTS/$appname"
 if [[ -n "$use_existing" ]]; then
-    ISO=build/product.iso
-    [[ -f "$ISO" ]] || fatal "iso $PWD/$ISO not found"
+    if [[ -n "$iso" ]]; then
+        ISO="$iso"
+    else
+        ISO=build/product.iso
+    fi
+    [[ -f "$ISO" ]] || fatal "$ISO not found"
 else
     info "Preperation done. Building appliance $appname."
     cd "$BT_PRODUCTS/$appname"
