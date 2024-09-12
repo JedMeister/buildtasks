@@ -8,6 +8,7 @@ import argparse
 import socket
 import subprocess
 import sys
+import json
 import os
 from os.path import dirname, join, exists
 from time import sleep
@@ -56,40 +57,36 @@ def gen_args(switch: str, values: list[str | int | None]) -> list[str]:
     return args
 
 
-class Container:
-    def __init__(self, cont_info: str):
-        try:
-            id, fullname, tag, status = cont_info.split(':')
-            self.id = id
-            self.fullname = fullname
-            self.name = self._get_shortname(fullname)
-            self.tag = tag
-            self.status = self._trim_status(status)
+def _split_name(name_str: str) -> tuple[str, str, str]:
+    fullname, tag = name_str.split(":")
+    _, repo, shortname = fullname.split("/")
+    if repo == "selenium":
+        shortname = "selenium"
+    return fullname, shortname, tag
 
-        except ValueError:
-            self.id = ""
-            self.fullname = ""
-            self.name = ""
-            self.tag = ""
-            self.status = ""
 
-    @staticmethod
-    def _get_shortname(fullname: str) -> str:
-        split = fullname.split("/")
-        if "selenium" in split:
-            return "selenium"
-        elif "tkl" in split:
-            return split[-1]
-        warning(f"unexpected container name: {fullname}")
-        return ""
+class PodmanObj:
+    def __init__(self,
+                 info: dict[str, str | list[str]],
+                 obj_type: str
+                 ) -> None:
+        # info is python representation of json obj
+        info = _get_info(obj_type)
+        self.obj_type = obj_type
+        if obj_type == "container":
+            name_str = str(info["Image"]) = info 
+        self.id = str(info["Id"][:12])
+        name_str = str(info["Image"])
+        self.fullname, self.name, self.tag = _split_name(name_str)
+        self.image_id = str(info["ImageId"][:12])
+        self.state = str(cont_info["State"])
 
     @staticmethod
-    def _trim_status(status: str) -> str:
-        # short status should be one of: up|stopping|exited
-        short_status = status.lower().split()[0]
-        return short_status
+    def _get_info(obj_type: str) -> str:
+
 
     def check(self, value) -> bool:
+        # value can be id, fullname or shortname
         if (self.id.startswith(value)
                 or self.fullname == value
                 or self.name == value):
@@ -98,46 +95,51 @@ class Container:
 
     @property
     def info(self) -> tuple[str, str, str, str, str]:
-        return self.id, self.fullname, self.name, self.tag, self.status
+        return self.id, self.fullname, self.name, self.tag, self.state
 
     def __str__(self) -> str:
-        if self.name:
-            return self.name
-        else:
-            return "None"
+        return self.name
 
     def __repr__(self) -> str:
         return f"Container{self.info}"
 
 
-def find_container(container_id_name: str) -> Container:
-    """Search for container id/name. Return first running container that
-    matches, fallback to stopped matching container"""
-    container = Container("")
+class Image:
+    def __init__(self, image_info: dict[str, str | list[str]]) -> None:
+        # conf_info is python representation of json obj
+        self.id = image_info["Id"][:12]
+        self.fullname, self.tag 
+        self.name 
+        
+
+
+def find_container(container_id_name: str) -> list[Container]:
+    """Search for container id/name. Return list of containers that
+    match"""
     if container_id_name == "selenium":
         container_id_name = SELENIUM_CONT
-    all_containers = subprocess.run(
-                        ["podman", "ps", "--all",
-                         "--format", "{{.ID}}:{{.Image}}:{{.Status}}"],
-                        capture_output=True,
-                        text=True,
-                        check=True,
-                        ).stdout
-    for cont_info in all_containers.split('\n'):
-        if cont_info:
-            this_container = Container(cont_info)
-            if this_container.check(container_id_name):
-                if this_container.status == "up":
-                    return this_container
-                else:
-                    container = this_container
-    return container
+    matching_containers = []
+    all_containers = json.loads(
+                        subprocess.run(
+                            [
+                                "podman", "ps", "--all",
+                                "--format", "json"
+                            ],
+                            capture_output=True,
+                            text=True,
+                            check=True,
+                            ).stdout)
+    for container_info in all_containers:
+        this_container = Container(container_info)
+        if this_container.check(container_id_name):
+            matching_containers.append(this_container)
+    return matching_containers
 
 
 def app_image_check(appliance: str,
                     existing_action: str = "die",
                     ) -> bool:
-    """If app container exists; behaviour depends on 'existing_action':
+    """If app image exists; behaviour depends on 'existing_action':
         == 'die' - will fail (default)
                 NoReturn
         == 'delete' - delete existing image and continue
@@ -160,31 +162,34 @@ def app_image_check(appliance: str,
     return True  # just to make pyright happy...
 
 
-def get_image_id(appliance: str) -> str:
-    for image in subprocess.run(
-                    ["podman",
-                     "images",
-                     "--format",
-                     "{{.ID}}:{{.Repository}}"
-                     ],
-                    capture_output=True,
-                    text=True,
-                    check=True).stdout.split('\n'):
-        if image:
-            id, name = image.split(":")
-            if name.endswith(f"/{appliance}"):
-                info(f"{appliance} image found: {id}")
-                return id
-    warning(f"{appliance} image not found")
-    return ""  # just to make pyright happy...
+def get_image_id(appliance: str, quiet: bool = False) -> str:
+    for image in json.loads(
+                    subprocess.run(
+                        [
+                            "podman",
+                            "images",
+                            "--format",
+                            "json"
+                        ],
+                        capture_output=True,
+                        text=True,
+                        check=True).stdout):
+        name = image["Names"][0].split(':')[0]
+        id = image["Id"][:12]
+        if name.endswith(f"/{appliance}"):
+            info(f"{appliance} image found: {id}")
+            return id
+    if not quiet:
+        warning(f"{appliance} image not found")
+    return ""
 
 
 def delete_image(appliance: str) -> None:
-    image_id = get_image_id(appliance)
+    image_id = get_image_id(appliance, quiet=True)
     if image_id:
         warning(f"deleting {appliance} image (id: {image_id})")
         subprocess.run(
-                ["podman", "rmi", "-f", image_id],
+                ["podman", "rmi", "--force", image_id],
                 capture_output=True,
                 check=True
                 )
@@ -209,8 +214,8 @@ def run_container(container: Container,
             podman_args = ["start", container.id]
     else:
         hosts = add_hosts if add_hosts else []
-        podman_args = ["run", "-dt", container.id]
-        podman_args.extend(gen_args("-p", [f"{p}:{p}" for p in ports]))
+        podman_args = ["run", "--detach", "--tty", container.id]
+        podman_args.extend(gen_args("--publish", [f"{p}:{p}" for p in ports]))
         podman_args.extend(gen_args("--add-host",
                                     [f"{h}:{bind_ip}" for h in hosts]))
         podman_args.extend(gen_args("--tmpfs", list(tmp_fs)))
