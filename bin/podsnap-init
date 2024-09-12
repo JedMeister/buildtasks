@@ -33,7 +33,7 @@ def info(msg: str) -> None:
 
 
 def warning(msg: str) -> None:
-    print(f"warning [{APP_NAME}] {msg}", file=sys.stderr)
+    print(f"WARN [{APP_NAME}] {msg}", file=sys.stderr)
 
 
 def fatal(msg: str) -> None:
@@ -59,17 +59,29 @@ def gen_args(switch: str, values: list[str | int | None]) -> list[str]:
 class Container:
     def __init__(self, cont_info: str):
         try:
-            id, name, tag, status = cont_info.split(':')
+            id, fullname, tag, status = cont_info.split(':')
             self.id = id
-            self.name = name
+            self.fullname = fullname
+            self.name = self._get_shortname(fullname)
             self.tag = tag
             self.status = self._trim_status(status)
 
         except ValueError:
             self.id = ""
+            self.fullname = ""
             self.name = ""
             self.tag = ""
             self.status = ""
+
+    @staticmethod
+    def _get_shortname(fullname: str) -> str:
+        split = fullname.split("/")
+        if "selenium" in split:
+            return "selenium"
+        elif "tkl" in split:
+            return split[-1]
+        warning(f"unexpected container name: {fullname}")
+        return ""
 
     @staticmethod
     def _trim_status(status: str) -> str:
@@ -78,19 +90,32 @@ class Container:
         return short_status
 
     def check(self, value) -> bool:
-        if self.id.startswith(value) or self.name.endswith(value):
+        if (self.id.startswith(value)
+                or self.fullname == value
+                or self.name == value):
             return True
         return False
 
     @property
-    def info(self) -> tuple[str, str, str, str]:
-        return self.id, self.name, self.tag, self.status
+    def info(self) -> tuple[str, str, str, str, str]:
+        return self.id, self.fullname, self.name, self.tag, self.status
+
+    def __str__(self) -> str:
+        if self.name:
+            return self.name
+        else:
+            return "None"
+
+    def __repr__(self) -> str:
+        return f"Container{self.info}"
 
 
 def find_container(container_id_name: str) -> Container:
     """Search for container id/name. Return first running container that
     matches, fallback to stopped matching container"""
     container = Container("")
+    if container_id_name == "selenium":
+        container_id_name = SELENIUM_CONT
     all_containers = subprocess.run(
                         ["podman", "ps", "--all",
                          "--format", "{{.ID}}:{{.Image}}:{{.Status}}"],
@@ -120,6 +145,22 @@ def app_image_check(appliance: str,
         == 'allow' - skip dockerization and continue
                 returns False
     """
+    image_id = get_image_id(appliance)
+    if image_id:
+        msg = f"action = '{existing_action}'"
+        if existing_action == "allow":
+            info(f"{msg}, so continuing")
+            return False
+        elif existing_action == "delete":
+            delete_image(appliance)
+        else:
+            fatal(f"{msg}; rerun with '--existing-action [delete|allow]'")
+    else:
+        warning(f"{appliance} image not found")
+    return True  # just to make pyright happy...
+
+
+def get_image_id(appliance: str) -> str:
     for image in subprocess.run(
                     ["podman",
                      "images",
@@ -132,64 +173,57 @@ def app_image_check(appliance: str,
         if image:
             id, name = image.split(":")
             if name.endswith(f"/{appliance}"):
-                start = f"{appliance} container found"
-                if existing_action == "allow":
-                    info(f"{start}; continuing")
-                    return False
-                elif existing_action == "delete":
-                    info(f"{start}; deleting")
-                    subprocess.run(
-                            ["podman", "rmi", "-f", id],
-                            capture_output=True,
-                            check=True
-                            )
-                else:
-                    fatal(f"{start}; rerun with '--existing-action"
-                          " [delete|allow]'")
-    return True
+                info(f"{appliance} image found: {id}")
+                return id
+    warning(f"{appliance} image not found")
+    return ""  # just to make pyright happy...
 
 
-def run_container(container: str,
+def delete_image(appliance: str) -> None:
+    image_id = get_image_id(appliance)
+    if image_id:
+        warning(f"deleting {appliance} image (id: {image_id})")
+        subprocess.run(
+                ["podman", "rmi", "-f", image_id],
+                capture_output=True,
+                check=True
+                )
+        info(f"done")
+
+
+def run_container(container: Container,
                   ports: list[int],
                   tmp_fs: list[str] = TMP_FS,
                   add_hosts: list[str] | None = None,
                   bind_ip: str = get_host_ip(),
                   ) -> str:
-    """Start podman container and return container ID.
-    'container' may be podman container ID or name/tag
-
-    """
+    """Start podman container and return container ID."""
     podman_com = ["podman"]
-    tag = "latest"
-    try:
-        name, _ = container.split("/")
-    except ValueError:
-        name = container
-    this_container = find_container(name)
-    if this_container.status:
+    if container.status:
         assume = "assuming has required ports & hosts entries"
-        if this_container.status == "up":
+        if container.status == "up":
             warning(f"{container} already running - {assume}")
-            return this_container.id
+            return container.id
         else:
             warning(f"{container} already exists, starting - {assume}")
-            podman_args = ["start", container]
+            podman_args = ["start", container.id]
     else:
         hosts = add_hosts if add_hosts else []
-        podman_args = ["run", "-dt", container]
+        podman_args = ["run", "-dt", container.id]
         podman_args.extend(gen_args("-p", [f"{p}:{p}" for p in ports]))
-        podman_args.extend(gen_args("--add_host",
+        podman_args.extend(gen_args("--add-host",
                                     [f"{h}:{bind_ip}" for h in hosts]))
         podman_args.extend(gen_args("--tmpfs", list(tmp_fs)))
+    podman_com.extend(podman_args)
     return subprocess.run(
-                podman_com.extend(podman_args),
+                podman_com,
                 capture_output=True,
                 text=True,
                 check=True,
                 ).stdout
 
 
-def wait_until_started(container: str,
+def wait_until_started(container: Container,
                        host: str = "127.0.0.1",
                        test_times: int = 25,
                        sleep_time: int = 2,
@@ -197,28 +231,32 @@ def wait_until_started(container: str,
 
     def curl(schema: str, host: str, port: int) -> int:
         ping = subprocess.run(["curl",
-                               "--insecure",
+                               "--location",  # follow redirects
+                               "--insecure",  # ignore self signed cert
                                f"{schema}://{host}:{port}"
-                               ]
+                               ],
+                              capture_output=True,
                               ).returncode
         # returncode 0 == success == False, so return 'not returncode'
         return not bool(ping)
 
     schema = "https"
-    if container == "selenium":
+    if container.fullname == SELENIUM_CONT:
         schema = "http"
         port = 7900
-    elif container == "tkldev":
+    elif container.name == "tkldev":
         return True
-    else:
+    elif container.name == "core":
         port = 12321
-    waiting = test_times*sleep_time
-    info(f"pinging {container}: - {schema}://{host}:{port}"
-         f" - will wait up to {waiting} for response")
+    else:
+        port = 443
+    info(f"{container} - waiting for response on {schema}://{host}:{port}")
     for times_tried in range(test_times):
-        if times_tried/5 == int(times_tried/5) and times_tried != test_times:
-            info(f"waiting {times_tried*sleep_time} more seconds")
+        times_remaining = test_times - times_tried
+        if times_tried/5 == int(times_tried/5) and times_tried > 0:
+            info(f"sleeping, will try up to {times_remaining} more times")
         if curl(schema, host, port):
+            info(f"{container} running")
             return True
         else:
             sleep(sleep_time)
@@ -262,6 +300,14 @@ def dockerize_app(app_name: str,
     return ""  # just to make pyright happy...
 
 
+def stop_container(container: Container) -> None:
+    if container.status == "up":
+        info(f"stopping {container.name}")
+        subprocess.run(["podman", "stop", container.id],
+                       capture_output=True,
+                       check=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      )
@@ -281,7 +327,7 @@ def main():
                         action="store_false",
                         help=("bind appliance container ports to the container"
                               " IP; otherwise bind to host"))
-    parser.add_argument("-S", "--source-path",
+    parser.add_argument("-s", "--source-path",
                         default="root.sandbox",
                         help=("path to source rootfs/iso - iso must end in"
                               "'iso' (default build/root.sandbox)"))
@@ -292,35 +338,56 @@ def main():
                         choices=["die", "delete", "allow"],
                         help=("Action to perform if appliance container"
                               " already exists (default: die)"))
+    parser.add_argument("-S", "--stop",
+                        action="store_true",
+                        help=("Stop selenium and appliance containers - all"
+                              " args above, other than 'appliance' are"
+                              " ignored"))
+    parser.add_argument("-C", "--clean",
+                        action="store_true",
+                        help=("Stop selenium container and delete appliance"
+                              " image - all args above, other than 'appliance'"
+                              " are ignored"))
+    parser.add_argument("-F", "--full-clean",
+                        action="store_true",
+                        help=("Delete all containers and delete appliance"
+                              " image - all above args, other than 'appliance'"
+                              " are ignored"))
     args = parser.parse_args()
+
+    if args.full_clean:
+        subprocess.run(["podman", "rm", "-f", "-a"],
+                       capture_output=True,
+                       check=True)
+        delete_image(args.appliance)
+        sys.exit(0)
+    elif args.clean:
+        stop_container(find_container("selenium"))
+        delete_image(args.appliance)
+        sys.exit(0)
+    elif args.stop:
+        stop_container(find_container(args.appliance))
+        stop_container(find_container("selenium"))
+        sys.exit(0)
+
     if not args.bind_container:
         raise NotImplementedError("TODO --bind-container")
-    if args.selenium_tag != SELENIUM_TAG:
-        raise NotImplementedError("TODO --selenium-tag")
-    else:
-        warning("TODO use selenium tag (not implemented)")
     if app_image_check(args.appliance, args.existing_action):
-        info(f"dockerizing and starting {args.appliance} container - please wait")
+        info(f"dockerizing and starting {args.appliance} container -"
+             " please wait")
         app_container = Container(dockerize_app(
                             args.appliance, args.source_path))
     else:
-        info(f"starting {args.appliance} container")
-        app_container = Container(find_container(appliance))
-    run_container(app_container.name)
-    sel_container = find_container("selenium")
-    run_container(sel_container.id)
-    else:
-        info("launching new selenium container")
-        sel_container = find_container(
-                            run_container(f"{SELENIUM_CONT}:SELENIUM_TAG",
-                                          ports=SEL_PORTS,
-                                          add_hosts=ADD_HOSTS)
-                            )
+        app_container = find_container(args.appliance)
 
-    info("waiting for containers to be ready")
-    if not wait_until_started(sel_container.id):
+    run_container(app_container, args.app_port)
+    sel_container = find_container("selenium")
+    run_container(sel_container, ports=SEL_PORTS, add_hosts=ADD_HOSTS)
+
+    info("checking containers are ready")
+    if not wait_until_started(sel_container):
         fatal("Given up waiting for selenium container")
-    if not wait_until_started(app_container.id):
+    if not wait_until_started(app_container):
         fatal(f"Given up waiting for {args.appliance} container")
 
 
