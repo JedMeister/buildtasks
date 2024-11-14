@@ -9,7 +9,7 @@ import socket
 import subprocess
 import sys
 import os
-from os.path import dirname, join, exists
+from os.path import dirname, join, exists, isdir, isfile
 from time import sleep
 
 APP_NAME = "podsnap-init"
@@ -270,16 +270,16 @@ def dockerize_app(app_name: str,
     container name.
     """
     dockerize = ["dockerize", "--quiet"]
-    product_rootfs = join(BT_PRODUCTS, app_name, "build", src_path)
-    docker_src = ""
-    if not src_path.endswith('iso'):
-        if src_path == "root.sandbox":
-            src_path = join(BT_PRODUCTS, app_name, "build", src_path)
-        dockerize.extend(["--rootfs", join(product, src_path, "--deckroot"])
-    else:
-        dockerize.extend(["--iso", src_path])
+    if src_path == "root.sandbox":
+        src_path = join(BT_PRODUCTS, app_name, "build", src_path)
     if not exists(src_path):
         fatal(f"source {src_path} not found")
+    if isfile(src_path) and src_path.endswith('iso'):
+        dockerize.extend(["--iso", src_path])
+    elif isdir(src_path):
+        dockerize.extend(["--rootfs", src_path, "--deckroot"])
+    else:
+        fatal(f"{src_path} is a file - but does not end with '.iso'")
     dockerize.extend(["--name", app_name])
     output = subprocess.run(dockerize,
                             capture_output=True,
@@ -323,7 +323,8 @@ def main():
     parser.add_argument("-s", "--source-path",
                         default="root.sandbox",
                         help=("path to source rootfs/iso - iso must end in"
-                              f" '.iso' (default {BT_PRODUCTS}/APP_NAME/build/root.sandbox)"))
+                              " '.iso' (default"
+                              f" {BT_PRODUCTS}/APP_NAME/build/root.sandbox)"))
     parser.add_argument("-e", "--existing-action",
                         default="die",
                         const="die",
@@ -371,7 +372,8 @@ def main():
     if app_image_check(args.appliance, args.existing_action):
         info(f"dockerizing and starting {args.appliance} container -"
              " please wait")
-        app_container = dockerize_app(args.appliance, args.source_path)
+        app_container = Container(
+                dockerize_app(args.appliance, args.source_path))
     else:
         app_container = find_container(args.appliance)
     sel_container = find_container("selenium")
