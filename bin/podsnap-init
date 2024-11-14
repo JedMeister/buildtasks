@@ -12,7 +12,7 @@ import os
 from os.path import dirname, join, exists
 from time import sleep
 
-APP_NAME = "appod-helper"
+APP_NAME = "podsnap-init"
 
 BT_PRODUCTS = os.getenv("BT_PRODUCTS", "/turnkey/fab/products")
 BT_ISOS = os.getenv("BT_ISOS", "/mnt/isos")
