@@ -270,23 +270,16 @@ def dockerize_app(app_name: str,
     container name.
     """
     dockerize = ["dockerize", "--quiet"]
-    product = join(BT_PRODUCTS, app_name, "build", src_path)
-    root_fs = True
+    product_rootfs = join(BT_PRODUCTS, app_name, "build", src_path)
     docker_src = ""
-    if src_path.endswith('iso'):
-        root_fs = ""
-    if src_path == "root.sandbox":
-        dockerize.extend(["--rootfs", join(product, src_path), "--deckroot"])
+    if not src_path.endswith('iso'):
+        if src_path == "root.sandbox":
+            src_path = join(BT_PRODUCTS, app_name, "build", src_path)
+        dockerize.extend(["--rootfs", join(product, src_path, "--deckroot"])
     else:
-        for source in src_path, join(BT_PRODUCTS, app_name, "build", src_path):
-            if exists(source):
-                docker_src = source
-        if not docker_src:
-            fatal(f"source not found: {src_path}")
-        if root_fs:
-            dockerize.extend(["--rootfs", docker_src])
-        else:
-            dockerize.extend(["--iso", docker_src])
+        dockerize.extend(["--iso", src_path])
+    if not exists(src_path):
+        fatal(f"source {src_path} not found")
     dockerize.extend(["--name", app_name])
     output = subprocess.run(dockerize,
                             capture_output=True,
@@ -330,7 +323,7 @@ def main():
     parser.add_argument("-s", "--source-path",
                         default="root.sandbox",
                         help=("path to source rootfs/iso - iso must end in"
-                              "'iso' (default build/root.sandbox)"))
+                              f" '.iso' (default {BT_PRODUCTS}/APP_NAME/build/root.sandbox)"))
     parser.add_argument("-e", "--existing-action",
                         default="die",
                         const="die",
@@ -360,14 +353,17 @@ def main():
                        capture_output=True,
                        check=True)
         delete_image(args.appliance)
+        info(f"all container(s) deleted and {args.appliance} image deleted")
         sys.exit(0)
     elif args.clean:
         stop_container(find_container("selenium"))
         delete_image(args.appliance)
+        info(f"selenium container stopped and {args.appliance} image deleted")
         sys.exit(0)
     elif args.stop:
         stop_container(find_container(args.appliance))
         stop_container(find_container("selenium"))
+        info(f"selenium and {args.appliance} containers stopped")
         sys.exit(0)
 
     if not args.bind_container:
@@ -375,19 +371,21 @@ def main():
     if app_image_check(args.appliance, args.existing_action):
         info(f"dockerizing and starting {args.appliance} container -"
              " please wait")
-        app_container = Container(dockerize_app(
-                            args.appliance, args.source_path))
+        app_container = dockerize_app(args.appliance, args.source_path)
     else:
         app_container = find_container(args.appliance)
-
-    run_container(app_container, args.app_port)
     sel_container = find_container("selenium")
+    run_container(app_container, args.app_port)
     run_container(sel_container, ports=SEL_PORTS, add_hosts=ADD_HOSTS)
 
     info("checking containers are ready")
-    if not wait_until_started(sel_container):
+    if wait_until_started(sel_container):
+        info("selenium container started")
+    else:
         fatal("Given up waiting for selenium container")
-    if not wait_until_started(app_container):
+    if wait_until_started(app_container):
+        info(f"{args.appliance} container started")
+    else:
         fatal(f"Given up waiting for {args.appliance} container")
 
 
