@@ -109,6 +109,31 @@ class Container:
     def __repr__(self) -> str:
         return f"Container{self.info}"
 
+# XXX start stuff from class
+
+def get_shortname(fullname: str) -> str:
+    split = fullname.split("/")
+    if "selenium" in split:
+        return "selenium"
+    elif "tkl" in split:
+        return split[-1]
+    warning(f"unexpected container name: {fullname}")
+    return ""
+
+def _trim_status(status: str) -> str:
+    # short status should be one of: up|stopping|exited
+    short_status = status.lower().split()[0]
+    return short_status
+
+def check(self, value) -> bool:
+    if (self.id.startswith(value)
+            or self.fullname == value
+            or self.name == value):
+        return True
+    return False
+
+# XXX end stuff from class
+
 
 def find_container(container_id_name: str) -> Container:
     """Search for container id/name. Return first running container that
@@ -160,6 +185,32 @@ def app_image_check(appliance: str,
     return True  # just to make pyright happy...
 
 
+def get_info(images_or_containers: str): -> list[dict[str]]:
+    """Returns list of images or containers and relevant associated info
+       - image_or_container must be one of 'images'|'containers'
+    """
+    podman_comm = ["podman"]
+    all_info = []
+    if images_or_containers == "images":
+         # podman images --format  "{{.ID}}_-_{{.Repository}}_-_{{.Tag}}"
+         # id, repo, tag = output_list.split('_-_')
+         info = {
+                "type": "image",
+                "name": "",
+                "id": "",
+                "tag": ""
+                }
+        podman_comm.extend([
+            "images", "--format", "{{.Repository}} {{.Tag}} {{.ID}}"])
+
+    elif images_or_containers == "containers":
+        # podman ps --format  "{{.ID}}_-_{{.ImageID}}_-_{{.Ports}}_-_{{.Status}}"
+        # id, imageid, ports, status = output_list.split('_-_') 
+
+    else:
+        fatal(f"Invalid get_info() value: {images_or_containers}")
+
+
 def get_image_id(appliance: str) -> str:
     for image in subprocess.run(
                     ["podman",
@@ -191,14 +242,16 @@ def delete_image(appliance: str) -> None:
         info(f"done")
 
 
-def run_container(container: Container,
+def run_container(container_or_image_id: str,
                   ports: list[int],
                   tmp_fs: list[str] = TMP_FS,
                   add_hosts: list[str] | None = None,
                   bind_ip: str = get_host_ip(),
                   ) -> str:
-    """Start podman container and return container ID."""
-    podman_com = ["podman"]
+    """Create a podman container from image and start - returns container ID."""
+    # e.g. podman run --detach --publish 80:80 --publish 443:443 --publish 12321:12321 --publish 12322:12322 --tmpfs /run --tmpfs /run/lock tkl/rail
+    podman_com = ["podman", "run"]
+    if 
     if container.status:
         assume = "assuming has required ports & hosts entries"
         if container.status == "up":
