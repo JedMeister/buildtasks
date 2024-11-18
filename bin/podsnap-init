@@ -187,32 +187,92 @@ def app_image_check(appliance: str,
         warning(f"{appliance} image not found")
     return True  # just to make pyright happy...
 
+def container_status(cont_id: str) -> str:
+        return json.loads(
+            subprocess.run(
+                ["podman", "inspect", "71aa29adcab7"],
+                capture_output=True,
+                text=True
+                ).stdout
+            )[0]['State']['Status']
 
-def get_info(images_or_containers: str) -> list[dict[str]]:
+
+def get_info(podm_type: str) -> list[dict[str]]:
     """Returns list of images or containers and relevant associated info
        - image_or_container must be one of 'images'|'containers'
     """
-    podman_comm = ["podman"]
-    all_info = []
+    if podm_type not in ["images", "containers"]:
+        fatal(f"Invalid get_info() type: {podm_type}")
+
+    def podm_info_list(sub_comm: list[str], format: str) -> list[str]:
+        info = []
+        podm_proc = subprocess.run(
+                ["podman", *sub_comm, "--format", format],
+                check=True,
+                capture_output==True,
+                text=True
+                )
+        for line in podm_proc.stdout.split("\n"):
+            if line != "":
+                info.append(line.split("_-_"))
+        return info
+
+    podm_info = []
+    # podman images --format  "{{.ID}}_-_{{.Repository}}_-_{{.Tag}}"
+    if podm_type == "images":
+        # podman images --format  "{{.ID}}_-_{{.Repository}}_-_{{.Tag}}"
+        for img_info in run_podm(
+            ["images"],
+            "{{.ID}}_-_{{.Repository}}_-_{{.Tag}}"
+            ):
+                podm_info.append({
+                    "type": "images",
+                    "id": img_info[0],
+                    "repo": img_info[1],
+                    "tag": img_info[2]
+                    })
+    elif podm_type == "containers":
+        # podman ps --format  "{{.ID}}_-_{{.ImageID}}_-_{{.Ports}}"
+        # - simple status str acquired via container_status()
+
+        def process_ports(raw_ports: str) -> list[str]:
+            
+            return ports
+
+        # podman ps --format  "{{.ID}}_-_{{.ImageID}}_-_{{.Ports}}_-_{{.Status}}"
+        for cont_info in run_podm(
+            ["ps", "--all"],
+            "{{.ID}}_-_{{.ImageID}}_-_{{.Ports}}_-_{{.Status}}"):
+                id, img_id, raw_ports, raw_status = cont_info
+                ports = process_ports(raw_ports)
+                status = process_status(raw_status)
+                podm_info.append({
+                    "type": "containers",
+                    "id": cont_info[0],
+                    "img_id": cont_info[1],
+                    "ports": 
+                    })
+    else:
+        fatal(f"Invalid get_info() value: {images_or_containers}")
     if images_or_containers == "images":
         # podman images --format  "{{.ID}}_-_{{.Repository}}_-_{{.Tag}}"
-        # id, repo, tag = output_list.split('_-_')
-        info = {
+        podman_comm.extend(["images", "--format", "{{.ID}}_-_{{.Repository}}_-_{{.Tag}}"])
+        for line in podm_proc.stdout.split("\n"):
+            id, repo, tag = podm_proc.stdout.split('_-_')
+            podm_info.append({
                 "type": "image",
-                "name": "",
-                "id": "",
-                "tag": ""
+                "id": id,
+                "repo": repo,
+                "tag": "tag"
                 }
-        podman_comm.extend([
-            "images", "--format", "{{.Repository}} {{.Tag}} {{.ID}}"])
-
     elif images_or_containers == "containers":
         # podman ps --format  "{{.ID}}_-_{{.ImageID}}_-_{{.Ports}}_-_{{.Status}}"
+        podman_comm.extend(["images", "--format", "{{.ID}}_-_{{.Repository}}_-_{{.Tag}}"])
         # id, imageid, ports, status = output_list.split('_-_')
 
     else:
         fatal(f"Invalid get_info() value: {images_or_containers}")
-
+fatal(f"Invalid get_info() value: {images_or_containers}")
 
 def get_image_id(appliance: str) -> str:
     for image in subprocess.run(
