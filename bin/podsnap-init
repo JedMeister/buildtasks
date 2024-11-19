@@ -440,32 +440,36 @@ def main():
                         help=("path to source rootfs/iso - iso must end in"
                               " '.iso' (default"
                               f" {BT_PRODUCTS}/APP_NAME/build/root.sandbox)"))
-    parser.add_argument("-e", "--existing-action",
+    parser.add_argument("-e", "--app-exists-action",
                         default="die",
                         const="die",
                         nargs="?",
                         choices=["die", "delete", "allow"],
                         help=("Action to perform if appliance container"
                               " already exists (default: die)"))
+    parser.add_argument("-E", "--selenium-exists-action",
+                        default="allow",
+                        nargs="?",
+                        choices=["die", "delete", "allow"],
+                        help=("Action to perform if selenium container"
+                              " already exists (default: allow)"))
     parser.add_argument("-S", "--stop",
                         action="store_true",
                         help=("Stop selenium and appliance containers - all"
-                              " args above, other than 'appliance' are"
-                              " ignored"))
+                              " args other than 'appliance' are ignored"))
     parser.add_argument("-C", "--clean",
                         action="store_true",
                         help=("Stop selenium container and delete appliance"
-                              " image - all args above, other than 'appliance'"
+                              " image - all args other than 'appliance'"
                               " are ignored"))
     parser.add_argument("-F", "--full-clean",
                         action="store_true",
-                        help=("Delete all containers and delete appliance"
-                              " image - all above args, other than 'appliance'"
-                              " are ignored"))
+                        help=("Delete all containers and appliance image - all"
+                              " args other than 'appliance' are ignored"))
     args = parser.parse_args()
 
     if args.full_clean:
-        subprocess.run(["podman", "rm", "-f", "-a"],
+        subprocess.run(["podman", "rm", "--force", "--all"],
                        capture_output=True,
                        check=True)
         delete_image(args.appliance)
@@ -477,8 +481,8 @@ def main():
         info(f"selenium container stopped and {args.appliance} image deleted")
         sys.exit(0)
     elif args.stop:
-        stop_container(find_container(args.appliance))
-        stop_container(find_container("selenium"))
+        for container in [args.appliance, "selenium"]:
+            stop_container(find_container(container))
         info(f"selenium and {args.appliance} containers stopped")
         sys.exit(0)
 
