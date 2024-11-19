@@ -1,7 +1,8 @@
 #!/usr/bin/python3
 
 """
-Initialise appliance & selenium containers ready for clicksnap
+Initialise appliance & selenium containers ready for clicksnap - or cleanup
+afterwards.
 """
 
 import argparse
@@ -138,10 +139,10 @@ def check(self, value) -> bool:
 # XXX end stuff from class
 
 
-def find_container(container_id_name: str) -> Container:
-    """Search for container id/name. Return first running container that
-    matches, fallback to stopped matching container"""
-    container = Container("")
+def find_container(container_id_name: str) -> dict[str]:
+    """Search for container id/name and return dictionary of relevant info.
+    More than one matching container will result in failure
+    """
     if container_id_name == "selenium":
         container_id_name = SELENIUM_CONT
     all_containers = subprocess.run(
