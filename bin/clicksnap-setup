@@ -1,5 +1,5 @@
 #!/bin/bash -e
-# Copyright (c) 2023 TurnKey GNU/Linux - https://www.turnkeylinux.org
+# Copyright (c) 2023-2026 TurnKey GNU/Linux - https://www.turnkeylinux.org
 #
 # This file is part of buildtasks.
 #
@@ -13,6 +13,7 @@ warn() { echo -e "WARNING [$(basename "$0")]: $*"; }
 info() { echo "INFO [$(basename "$0")]: $*"; }
 
 usage() {
+    local msg="$*"
     cat<<EOF
 Syntax: $(basename "$0") [APP_NAME]
 Setup/update system ready for bt-iso (clicksnap & deps)
@@ -29,9 +30,8 @@ Environment::
     BT_DEBUG        turn on debugging
 
 EOF
-    if [[ -n "$1" ]]; then
-        echo "Error: $*" >&2
-        exit 1
+    if [[ -n "$msg" ]]; then
+        fatal "$msg"
     fi
     exit
 }
@@ -119,19 +119,23 @@ done
 case "$(which cargo || echo 'fail')" in
     "$HOME/.cargo/bin/cargo")
         info "Rust installed via rustup detected, attempting update"
-        rustup update;;
+        rustup update
+        ;;
     /usr/bin/cargo)
         warn "system installed rust detected; continuing but may cause issues\n" \
-             "   - if you encountner issues, please remove rust and rerun";;
+             "   - if you encounter issues, please remove rust and rerun"
+        ;;
     fail)
         info "Installing rust via rustup"
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
         echo "export PATH=\"\$HOME/.cargo/bin:\$PATH\"" > "$HOME/.bashrc.d/rust"
         chmod +x "$HOME/.bashrc.d/rust"
         # shellcheck source=/dev/null
-        source "$HOME/.bashrc.d/rust";;
+        source "$HOME/.bashrc.d/rust"
+        ;;
     *)
-        fatal "Unexpected cargo path: '$1'";;
+        fatal "Unexpected cargo path: '$1'"
+        ;;
 esac
 
 cd "$BASE_DIR/clicksnap"
