@@ -1,5 +1,5 @@
 #!/bin/bash -e
-# Copyright (c) 2011-2021 TurnKey GNU/Linux - http://www.turnkeylinux.org
+# Copyright (c) 2011-2026 TurnKey GNU/Linux - https://www.turnkeylinux.org
 # 
 # This file is part of buildtasks.
 # 
@@ -179,6 +179,7 @@ BT=$(dirname "$link")
 export BT
 export BT_CONFIG="$BT/config"
 BT_COMMON_CONF="$BT_CONFIG/common.cfg"
+
 if [[ ! -d "$BT_CONFIG" ]]; then
     if [[ -z "$publish" ]]; then
         warning "$BT_CONFIG dir does not exist; attempting to use default conf"
