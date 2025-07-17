@@ -1,0 +1,66 @@
+#!/bin/bash -e
+
+# super simple script to download or update git repos
+
+# TODO
+# - get turnkey remote name
+#   e.g. git remote -v | sed -En "/fetch/ s|^([a-zA-Z0-9_-]+).*turnkeylinux/.*|\1|p"
+# - skip if uncommited file; perhaps even stash?
+# - rename branch if not desired branch
+#   (all pkg repos should use master - with exception of pycurl-wrapper)
+
+BASE_DIR=/turnkey/public
+# clone read only via https
+BASE_REMOTE=https://github.com/turnkeylinux
+REMOTE_NAME=turnkey
+
+repos=(
+    autoversion
+    confconsole
+    deck
+    deckdebuild
+    di-live
+    ebsmount
+    fab
+    hubclient
+    hubdns
+    hubtools
+    inithooks
+    octohub
+    pool
+    pycurl-wrapper
+    tkl-ec2metadata
+    tklamq
+    tkldev-detective
+    tklpatch
+    turnkey-chroot
+    turnkey-conffile
+    turnkey-gitwrapper
+    turnkey-lazyclass
+    turnkey-netinfo
+    turnkey-pylib
+    turnkey-ssl
+    turnkey-sysinfo
+    turnkey-version
+    verseek
+    webmin
+)
+
+
+
+mkdir -p "$BASE_DIR"
+cd "$BASE_DIR"
+for repo in "${repos[@]}"; do
+    if [[ -e "$repo" ]]; then
+        if [[ -d "$repo/.git" ]]; then
+            cd "$repo"
+            git checkout master
+            git pull turnkey
+            cd "$BASE_DIR"
+        else
+            warning "$repo is not a git repo - is file or has no .git dir"
+        fi
+    else
+        git clone -o "$BASE_URL/$repo"
+    fi
+done
